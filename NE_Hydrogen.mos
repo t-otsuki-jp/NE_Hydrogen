@@ -1,0 +1,1610 @@
+!------------------------------------------------------------------------
+!Model: NE_Hydrogen
+!Author: Takashi Otsuki
+!Creation date: 20260129
+!------------------------------------------------------------------------
+
+model NE_Hydrogen
+uses "mmxprs","mmsheet"
+parameters
+   LPALGORITHM = XPRS_BAR
+end-parameters
+
+!------------------------------------------------------------------------
+!parameters
+!------------------------------------------------------------------------
+declarations
+	!case setting
+	Case = 0
+
+	!Tentative parameters
+	Max_Availability	= 0.1
+	Duration_Battery1 	= 2*0.9/1000	!hour*availability/unit conversion to TWh
+	Duration_Battery2 	= 4*0.9/1000
+	Duration_Battery3 	= 8*0.9/1000
+	Unit_H2				= 0.9/1000/11.63
+	Unit_CH4			= 0.9/1000/11.63
+	Unit_MCH			= 0.9
+	Unit_AMM			= 0.9/1000/11.63
+	!other parameters defined inside the model
+	!TZD,TZT,NKMO,NKCF,NKSF,IKFG(defined below)
+
+	!
+	ID: 	array(0..16) of integer
+	ID_OTF:	array(0..1) of string	!output file range
+	RGE: 	integer
+	AC:		array(0..13,0..1) of integer
+	ACT:	integer
+	AC_LM:	array(0..1,0..19) of integer
+	NK:		array(0..28,0..1) of integer
+	NKT:	integer
+	NK_OP: 	array(0..3,0..1) of integer
+	NK_TPN:	integer
+	NK_TP:	array(0..1,0..1) of integer
+	IK:		array(0..5,0..1) of integer
+	IK_DK:	array(0..6,0..1) of integer
+	IKL:	array(0..5,0..1) of integer
+	IKL_DK:	array(0..6,0..1) of integer
+	FC:		array(0..4,0..19) of integer
+	FC_LD:	array(0..1,0..1) of integer
+	RS:		array(0..3,0..19) of integer
+end-declarations
+
+initializations from "mmsheet.excel:NE_Hydrogen_input.xlsx"
+	ID 		as "noindex;ID"
+	ID_OTF 	as "noindex;ID_OTF"
+	RGE 	as "noindex;RGE"
+	AC		as "noindex;AC"
+	ACT		as "noindex;ACT"
+	AC_LM	as "noindex;AC_LM"
+	NK		as "noindex;NK"
+	NKT		as "noindex;NKT"
+	NK_OP	as "noindex;NK_OP"
+	NK_TPN	as "noindex;NK_TPN"
+	NK_TP	as "noindex;NK_TP"
+	IK	 	as "noindex;IK"
+	IK_DK	as "noindex;IK_DK"
+	IKL		as "noindex;IKL"
+	IKL_DK	as "noindex;IKL_DK"
+	FC		as "noindex;FC"
+	FC_LD	as "noindex;FC_LD"
+	RS		as "noindex;RS"
+end-initializations
+
+declarations
+	!number of model elements
+	NND = ID(0)	!number of node
+	NRG = ID(1)	!number of region (for data export)
+	NIT = ID(2)	!number of item
+	NAC = ID(3)	!number of activity
+	NNK = ID(4)	!number of nodal facility
+	NIK = ID(5)	!number of maritime trade facility
+	NIKL= ID(6)	!number of land trade facility
+	NFC = ID(7)	!number of final consumption type
+	NRS = ID(8)	!number of final resource
+	NYR = ID(9)	!number of final resource
+	NDY = ID(10)	!number of day
+	NMN = ID(11)	!number of month
+	NWR = ID(12)	!number of weather pattern
+	NTM = ID(13)	!number of time slot per day
+	NTZ = ID(14)	!number of time zone
+	NIT2 = ID(15)	!number of item#2
+	NAC2 = ID(16)	!number of activity#2
+
+	!range
+	NNDr = 0..NND-1
+	NRGr = 0..NRG-1
+	NITr = 0..NIT-1
+	NACr = 0..NAC-1
+	NNKr = 0..NNK-1
+	NIKr = 0..NIK-1
+	NIKLr= 0..NIKL-1
+	NFCr = 0..NFC-1
+	NRSr = 0..NRS-1
+	NYRr = 0..NYR-1
+	NDYr = 0..NDY-1
+	NMNr = 0..NMN-1
+	NWRr = 0..NWR-1
+	NTMr = 0..NTM-1
+	NTZr = 0..NTZ-1
+	NIT2r= 0..NIT2-1
+	NAC2r= 0..NAC2-1
+
+	!string data
+	ID_ND:	array(NNDr) of string	!node label
+	ID_RG:	array(NRGr) of string	!region label
+	ID_IT:	array(NITr) of string	!item label
+	ID_SIG:	array(NITr) of string	!balance flag
+	ID_AC:	array(NACr) of string	!activity label
+	ID_NK:	array(NNKr) of string	!nodal facility label
+	ID_IK:	array(NIKr) of string	!inter-nodal facility label (maritime)
+	ID_IKL:	array(NIKLr) of string	!inter-nodal facility label (land)
+	ID_YR:	array(NYRr)  of string	!year label
+
+	!
+	RGD:	array(NNDr,NRGr) of integer	!node-region definition matrix
+	ID_ITM:	array(NITr) of integer		!item balance flag
+	ITMC1:	array(NITr) of integer		!item id -> item2
+	ITMC2:	array(NIT2r) of integer		!item2 range -> item id
+	ACTC1:	array(NACr) of integer		!activity id -> activity2
+	ACTC2:	array(NAC2r) of integer		!activity2 -> activity id
+	ID_NDTY:array(NNDr) of integer		!node type
+	ID_DCR:	array(NYRr) of real			!discount rate
+	ID_NDPD:array(NNDr) of real			!distance to port
+	ID_YRD:	array(NYRr) of real			!year duration
+	ID_YRD2:array(NYRr) of real			!number of years from the base year
+	ID_WRP: array(NWRr) of real			!weather probability
+	ID_DM:	array(NDYr) of integer			!month index
+	TW = 24./NTM
+	DW = 365./NDY
+	DT = 1./NDY/NTM
+	DTW:	array(NWRr) of real			!time slot width ratio
+	DMD:	array(NDYr,NMNr) of integer	!day-month matrix
+	DMD2:	array(NMNr) of real			!day-month matrix
+
+	!emission constraint
+	RGE_D:	array(0..RGE-1,NYRr) of real	!emission constraint
+	CTAX_D:	array(0..RGE-1,NYRr) of real	!carbon tax data
+	CTAX:	array(NRGr,NYRr) of real		!carbon tax
+
+	!time difference
+	ID_NDTM:array(NNDr) of integer
+	ID_TZD:	array(NTZr) of real	!time zone definition
+	TZr = 0..1
+	TZD:	array(NTZr,NDYr,NTMr,NTZr,TZr) of integer
+	TZT:	array(NTZr,NTMr,NTZr,TZr) of integer
+	TZW:	array(NTZr,NTZr,TZr) of real
+
+	!activity flow (AC)
+	ACI:	array(0..AC(0,1)-1) of integer					!activity index
+	ACF:	array(0..AC(1,0)-1,0..AC(1,1)-1) of integer		!activity&item
+	ID_ACM:	array(NACr) of integer							!item balance flag
+	ACD_1:	array(0..AC(2,0)-1,0..AC(2,1)-1) of real		!activity data 1
+	ACD_2:	array(0..AC(3,0)-1,0..AC(3,1)-1) of real		!activity data 2
+	ACD_3:	array(0..AC(4,0)-1,0..AC(4,1)-1) of real		!activity data 3
+	mat_i:	array(NITr,NACr) of integer
+	mat_c:	array(NITr,NACr) of real
+	ACCO:	array(0..ACT-1,NNDr,NYRr) of real
+	ACCO1:	array(0..ACT-1,NNDr,NYRr) of real
+	ACSL:	array(0..NIT) of integer
+	ACSL2:	array(0..NIT2) of integer
+	AC2FLG:	array(0..NIT2) of integer
+
+	ACVR:	array(0..ACT-1) of integer
+	ACVR2:	array(0..ACT-1) of integer
+
+	!activity limits
+	AC_LMI:	array(0..AC_LM(0,1)-1) of integer
+	AC_LMD:	array(0..AC_LM(1,0)-1,0..AC_LM(1,1)-1) of real
+	AC_LMT:	array(NACr,NRGr,NYRr) of real
+
+	!nodal activity stock (NK)
+	NKI:	array(0..NK(0,1)-1) of integer
+	NKF:	array(0..NK(1,0)-1,0..NK(1,1)-1) of integer
+	NKD_1:	array(0..NK(2,0)-1,0..NK(2,1)-1) of integer
+	NKD_2:	array(0..NK(3,0)-1,0..NK(3,1)-1) of real
+	NKD_3:	array(0..NK(4,0)-1,0..NK(4,1)-1) of real
+	NK_LAF:	array(0..NK(14,0)-1,0..NK(14,1)-1) of real	!location factor for capacity factor
+	NK_LCC:	array(0..NK(15,0)-1,0..NK(15,1)-1) of real	!location factor for capital cost
+	NK_KI:	array(0..NK(16,1)-1) of integer
+	NK_EKD:	array(0..NK(17,0)-1,0..NK(17,1)-1) of real	!exogenous capacity
+	NK_MKD:	array(0..NK(18,0)-1,0..NK(18,1)-1) of real	!maximum capacity
+	NKTY: 	array(NNKr) of integer
+	NKOPI: 	array(NNKr) of integer
+	NKSL: 	array(0..NNK) of integer
+	NKVR: 	array(0..NKT-1) of integer
+	NKVR2: 	array(0..NKT-1) of integer
+	mat_k: 	array(NNKr,NACr) of integer
+	NKLF: 	array(NNKr,NYRr,NYRr) of integer		!lifetime matrix
+	NKAF: 	array(NNKr,NNDr) of real				!availability
+	NKAF2: 	array(NNKr,NNDr,NDYr,NWRr,NTMr) of real	!availability
+	NKAFm: 	array(NNKr,NNDr) of real				!minimum availability
+	NKAF2m: array(NNKr,NNDr,NDYr,NWRr,NTMr) of real	!minimum availability
+	NKCC: 	array(NNKr,NNDr,NYRr) of real	!capital costs
+	NKEK: 	array(NNKr,NNDr,NYRr) of real	!exogenous capacity
+	NKMK: 	array(NNKr,NNDr,NYRr) of real	!maximum capacity
+	NKCF: 	array(NNKr,NNDr,0..1) of real	!average capacity factor and max availability, min output
+	NKSF: 	array(NWRr) of real				!stored energy factor
+
+	!NodalCapacity_TimeProfile(NK_TP)
+	NK_TPI: array(0..NK_TP(0,0)-1,0..NK_TP(0,1)-1) of integer
+	NK_TPD: array(0..NK_TP(1,0)-1,0..NK_TP(1,1)-1) of real
+	NK_TPD2:array(0..NK_TPN*NND-1,NDYr,NWRr,NTMr) of real
+
+	!NK_Operational_information
+	NNKMS	=	NK_OP(1,0) !number of maintenance schedule
+	NNKMSr	=	0..NNKMS-1
+	NNKOPr	=	0..NK_OP(2,1)-1
+
+	NK_OPI:	array(NNKOPr) of integer
+	NK_MSI:	array(0..NK_OP(0,1)-1) of integer
+	NK_MSD:	array(0..NK_OP(1,0)-1,0..NK_OP(1,1)-1) of real
+	NK_OPD:	array(0..NK_OP(3,0)-1,0..NK_OP(3,1)-1) of real
+	NKRU:	array(NNKOPr) of real
+	NKRD:	array(NNKOPr) of real
+	NKMS:	array(NNKMSr,NDYr) of real
+	NKMSA:	array(NNKMSr) of real
+	NKMO:	array(NNKOPr,0..1) of real !share of DSS and minimum output rate
+
+	!Maritime trade stock(IK)
+	IKI:	array(0..IK(0,1)-1) of integer
+	IKF:	array(0..IK(1,0)-1,0..IK(1,1)-1) of integer
+	IKF2:	array(0..IK(1,0)-1,0..IK(1,1)-1) of integer
+	IKT:	array(0..IK(2,1)-1) of integer
+	IKC:	array(0..IK(3,1)-1) of integer
+	IKD_1:	array(0..IK(4,0)-1,0..IK(4,1)-1) of real
+	IKD_2:	array(0..IK(5,0)-1,0..IK(5,1)-1) of real
+
+	!maritime distance and existing capacity between nodes
+	IK_DKI:	array(0..IK_DK(0,0)-1,0..IK_DK(0,1)-1) of integer
+	IK_EKI:	array(0..IK_DK(3,0)-1) of integer
+	IK_MKI:	array(0..IK_DK(5,0)-1) of integer
+	IK_DSD:	array(0..IK_DK(2,0)-1,0..IK_DK(2,1)-1) of real
+	IK_EKD:	array(0..IK_DK(4,0)-1,0..IK_DK(4,1)-1) of real
+	IK_MKD:	array(0..IK_DK(6,0)-1,0..IK_DK(6,1)-1) of real
+
+	!number of maritime routes
+	NRM	=	IK_DK(0,1)
+	NRMr=	0..NRM-1
+
+	!land trade stock(IKL)
+	!Maritime trade stock(IK)
+	IKLI:	array(0..IKL(0,1)-1) of integer
+	IKLF:	array(0..IKL(1,0)-1,0..IKL(1,1)-1) of integer
+	IKLF2:	array(0..IKL(1,0)-1,0..IKL(1,1)-1) of integer
+	IKLT:	array(0..IKL(2,1)-1) of integer
+	IKLC:	array(0..IKL(3,1)-1) of integer
+	IKLD_1:	array(0..IKL(4,0)-1,0..IKL(4,1)-1) of real
+	IKLD_2:	array(0..IKL(5,0)-1,0..IKL(5,1)-1) of real
+	!land Distance and existing capacity between nodes
+	IKL_DKI:array(0..IKL_DK(0,0)-1,0..IKL_DK(0,1)-1) of integer
+	IKL_EKI:array(0..IKL_DK(3,0)-1) of integer
+	IKL_MKI:array(0..IKL_DK(5,0)-1) of integer
+	IKL_DSD:array(0..IKL_DK(2,0)-1,0..IKL_DK(2,1)-1) of real
+	IKL_EKD:array(0..IKL_DK(4,0)-1,0..IKL_DK(4,1)-1) of real
+	IKL_MKD:array(0..IKL_DK(6,0)-1,0..IKL_DK(6,1)-1) of real
+	!number of land routes
+	NRL  = IKL_DK(0,1)
+	NRLr = 0..NRL-1
+	!maritime trade
+	IKTY: 	array(NIKr) of integer
+	IKT2:	array(NIKr) of integer
+	IKFG:	array(NIKr,NRMr) of integer		!flag
+	IKLFM:	array(NIKr,NYRr,NYRr) of integer	!lifetime matrix
+	MAT:	array(0..1,NRMr,NNDr) of integer
+	IKDS: 	array(0..IK_DK(2,0)-1,NRMr) of real !distance
+	IKEF: 	array(NIKr,NRMr) of real	!efficiency
+	IKAF: 	array(NIKr,NRMr) of real	!availability
+	IKCC:	array(NIKr,NRMr) of real	!capital cost
+	IKVC:	array(NIKr,NRMr) of real	!variable cost
+	IKEK:	array(NIKr,NRMr) of real	!existing capacity
+	IKMK:	array(NIKr,NRMr) of real	!maximum capacity
+	!land trade
+	IKLTY:	array(NIKLr) of integer
+	IKLT2:	array(NIKLr) of integer
+	IKLFG:	array(NIKLr,NRLr) of integer		!flag
+	IKLLFM:	array(NIKLr,NYRr,NYRr) of integer	!lifetime matrix
+	MATL:	array(0..1,NRLr,NNDr) of integer
+	IKLDS:	array(0..IKL_DK(2,0)-1,NRLr) of real !distance
+	IKLEF:	array(NIKLr,NRLr) of real	!efficiency
+	IKLAF:	array(NIKLr,NRLr) of real	!availability
+	IKLCC:	array(NIKLr,NRLr) of real	!capital cost
+	IKLVC:	array(NIKLr,NRLr) of real	!variable cost
+	IKLEK:	array(NIKLr,NRLr) of real 	!existing capacity
+	IKLMK:	array(NIKLr,NRLr) of real 	!maximum capacity
+
+	!finalConsumption(FC)
+	FCI:	array(0..FC(0,1)-1) of integer
+	FCF:	array(0..FC(1,1)-1) of integer
+	FCS:	array(0..FC(2,0)-1,0..FC(2,1)-1) of integer
+	FCD:	array(0..FC(3,0)-1,0..FC(3,1)-1) of real
+	FCD_2:	array(0..FC(4,0)-1,0..FC(4,1)-1) of real
+	FC_LDI:	array(0..FC_LD(0,0)-1,0..FC_LD(0,1)-1) of integer
+	FC_LDD:	array(0..FC_LD(1,0)-1,0..FC_LD(1,1)-1) of real
+	FC_LDD2:array(NFCr,NNDr,NYRr,NDYr,NTMr) of real
+	!right hand side (RHS) of the constraints
+	RHS0:	array(NITr,NNDr,NYRr) of real
+	RHS2:	array(NIT2r,NNDr,NYRr,NDYr,NWRr,NTMr) of real
+
+	!resource(RS)
+	RSI:	array(0..RS(0,1)-1) of integer
+	RSF:	array(0..RS(1,1)-1) of integer
+	RST:	array(0..RS(2,1)-1) of integer
+	RSF0:	array(NRSr) of integer
+	RST0:	array(NRSr) of integer
+	RSD:	array(0..RS(3,0)-1,0..RS(3,1)-1) of real
+	RSD0:	array(NRSr,NNDr,NYRr) of real
+end-declarations
+
+initializations from "mmsheet.excel:NE_Hydrogen_input.xlsx"
+	ID_ND	as	"noindex;ID_ND"
+	ID_RG	as	"noindex;ID_RG"
+	ID_IT	as	"noindex;ID_IT"
+	ID_SIG	as	"noindex;ID_SIG"
+	ID_AC	as	"noindex;ID_AC"
+	ID_NK	as	"noindex;ID_NK"
+	ID_IK	as	"noindex;ID_IK"
+	ID_IKL	as	"noindex;ID_IKL"
+	ID_YR	as	"noindex;ID_YR"
+
+	RGD		as	"noindex;RGD"
+	ID_ITM	as	"noindex;ID_ITM"
+	ID_NDTY	as	"noindex;ID_NDTY"
+	ID_DCR	as	"noindex;ID_DCR"
+	ID_NDPD	as	"noindex;ID_NDPD"
+	ID_YRD	as	"noindex;ID_YRD"
+	ID_YRD2	as	"noindex;ID_YRD2"
+	ID_WRP 	as	"noindex;ID_WRP"
+	ID_DM 	as	"noindex;ID_DM"
+
+	RGE_D	as	"noindex;RGE_D"
+	CTAX_D	as	"noindex;CTAX_D"
+
+	ID_NDTM	as  "noindex;ID_NDTM"
+	ID_TZD	as	"noindex;ID_TZD"
+
+	ACI		as	"noindex;ACI"
+	ACF		as	"noindex;ACF"
+	ID_ACM	as	"noindex;ID_ACM"
+
+	ACD_1	as	"noindex;ACD_1"
+	ACD_2	as	"noindex;ACD_2"
+	ACD_3	as	"noindex;ACD_3"
+
+	AC_LMI	as	"noindex;AC_LMI"
+	AC_LMD	as	"noindex;AC_LMD"
+
+	NKI		as	"noindex;NKI"
+	NKF		as	"noindex;NKF"
+	NKD_1	as	"noindex;NKD_1"
+	NKD_2	as	"noindex;NKD_2"
+	NKD_3	as	"noindex;NKD_3"
+	NK_LAF	as	"noindex;NK_LAF"
+	NK_LCC	as	"noindex;NK_LCC"
+	NK_KI	as	"noindex;NK_KI"
+	NK_EKD	as	"noindex;NK_EKD"
+	NK_MKD	as	"noindex;NK_MKD"
+
+	NK_TPI	as	"noindex;NK_TPI"
+	NK_TPD	as	"noindex;NK_TPD"
+
+	NK_OPI	as	"noindex;NK_OPI"
+	NK_MSI	as	"noindex;NK_MSI"
+	NK_MSD	as	"noindex;NK_MSD"
+	NK_OPD	as	"noindex;NK_OPD"
+
+	IKI		as	"noindex;IKI"
+	IKF		as	"noindex;IKF"
+	IKT		as	"noindex;IKT"
+	IKC		as	"noindex;IKC"
+	IKD_1	as	"noindex;IKD_1"
+	IKD_2	as	"noindex;IKD_2"
+
+	IK_DKI	as	"noindex;IK_DKI"
+	IK_EKI	as	"noindex;IK_EKI"
+	IK_MKI	as	"noindex;IK_MKI"
+	IK_DSD	as	"noindex;IK_DSD"
+	IK_EKD	as	"noindex;IK_EKD"
+	IK_MKD	as	"noindex;IK_MKD"
+
+	IKLI	as	"noindex;IKLI"
+	IKLF	as	"noindex;IKLF"
+	IKLT	as	"noindex;IKLT"
+	IKLC	as	"noindex;IKLC"
+	IKLD_1	as	"noindex;IKLD_1"
+	IKLD_2	as	"noindex;IKLD_2"
+
+	IKL_DKI	as	"noindex;IKL_DKI"
+	IKL_EKI	as	"noindex;IKL_EKI"
+	IKL_MKI	as	"noindex;IKL_MKI"
+	IKL_DSD	as	"noindex;IKL_DSD"
+	IKL_EKD	as	"noindex;IKL_EKD"
+	IKL_MKD	as	"noindex;IKL_MKD"
+
+	FCI		as	"noindex;FCI"
+	FCF		as	"noindex;FCF"
+	FCS		as	"noindex;FCS"
+	FCD		as	"noindex;FCD"
+	FCD_2	as	"noindex;FCD_2"
+	FC_LDI	as	"noindex;FC_LDI"
+	FC_LDD	as	"noindex;FC_LDD"
+
+	RSI		as	"noindex;RSI"
+	RSF		as	"noindex;RSF"
+	RST		as	"noindex;RST"
+	RSD		as	"noindex;RSD"
+end-initializations
+
+
+!------------------------------------------------------------------------
+!preprocess1
+!------------------------------------------------------------------------
+writeln("preprocess1: general")
+
+i2:=0
+forall(i in NITr) do
+	if ID_ITM(i)<>0	then
+		ITMC1(i):=i2
+		ITMC2(i2):=i
+		i2+=1
+	else
+		ITMC1(i):=-1
+	end-if
+end-do
+
+i2:=0
+forall(i in NACr) do
+	if ID_ACM(i)<>0	then
+		ACTC1(i):=i2
+		ACTC2(i2):=i
+		i2+=1
+	else
+		ACTC1(i):=-1
+	end-if
+end-do
+
+forall(w1 in NWRr) DTW(w1) := 1.*ID_WRP(w1)/NDY/NTM
+
+!day-month index
+forall(d in NDYr, m in NMNr) do
+	if ID_DM(d)<>m then
+		DMD(d,m):=0
+	else
+		DMD(d,m):=1
+	end-if
+end-do
+
+forall(m in NMNr) do
+	DMD2(m):=sum(d in NDYr)DMD(d,m)
+end-do
+
+!carbon tax
+forall(r in NRGr,y in NYRr) do
+	CTAX(r,y):=0
+	if CTAX_D(Case*NRG+r,y)<>-1 then
+		CTAX(r,y):=CTAX_D(Case*NRG+r,y)
+	end-if
+end-do
+
+!time difference
+forall(i in TZr,tz1 in NTZr,t1 in NTMr,tz2 in NTZr) do
+	TZT(tz1,t1,tz2,i) :=0
+	forall(d1 in NDYr)TZD(tz1,d1,t1,tz2,i) :=0
+end-do
+
+forall(tz1 in NTZr,d1 in NDYr,t1  in NTMr,tz2 in NTZr) do
+	td0 := ID_TZD(tz2)-ID_TZD(tz1)
+	td1 := floor(td0/TW)
+	td2 := ceil(td0/TW)
+	tw1 := abs(td0/TW)
+	tw1 -= floor(tw1)
+	t2 := t1+td1
+	t3 := t1+td2
+
+	if t2 >= NTM then
+		t2-=NTM
+		d2:=d1+1
+		if d2>=NDY then
+			d2-=NDY
+		end-if
+	elif t2<0 then
+		t2 += NTM
+		d2:=d1-1
+		if d2<0 then
+			d2+=NDY
+		end-if
+	else
+		d2:=d1
+	end-if
+
+	if t3>=NTM then
+		t3-=NTM
+		d3:=d1+1
+		if d3>=NDY then
+			d3-=NDY
+		end-if
+	elif t3<0 then
+		t3+=NTM
+		d3:=d1-1
+		if d3<0 then
+			d3+=NDY
+		end-if
+	else
+		d3:=d1
+	end-if
+
+	TZD(tz1,d1,t1,tz2,0):=d2
+	TZD(tz1,d1,t1,tz2,1):=d3
+	TZT(tz1,t1,tz2,0):=t2
+	TZT(tz1,t1,tz2,1):=t3
+
+	if td0>=0 then
+		TZW(tz1,tz2,0):=1.-tw1
+		TZW(tz1,tz2,1):=tw1
+	else
+		TZW(tz1,tz2,0):=tw1
+		TZW(tz1,tz2,1):=1.-tw1
+	end-if
+end-do
+
+!------------------------------------------------------------------------
+!preprocess2
+!------------------------------------------------------------------------
+writeln("preprocess2: activity")
+
+forall(i in NITr,j in NACr) do
+	mat_i(i,j):=0
+	mat_c(i,j):=0
+end-do
+
+forall(i in NIT2r) do
+	AC2FLG(i):=0
+end-do
+
+i2:=0
+forall(j in 0..AC(1,1)-1,i in 1..AC(1,0)-1) do
+	i2:=ACF(i,j)
+	if i2<>-1 then mat_i(i2,ACI(j)):=1
+	end-if
+end-do
+
+i2:=0
+forall(i in 0..NIT-1) do
+	ACSL(i):=i2
+	forall(j in NACr) do
+		if(mat_i(i,j)=1) then
+			ACVR(i2):=j
+			i2+=1
+		end-if
+	end-do
+end-do
+ACSL(NIT):=i2
+
+forall(y in NYRr,n in NNDr) do
+	forall(j in 0..AC(1,1)-1) do
+		forall(i in 1..AC(1,0)-1) do
+			i2:=ACF(i,j)
+			if i2<>-1 then
+				if i=AC(1,0)-1 then
+					mat_c(i2,ACI(j)):=ACD_3(y*NND+n,j)
+				elif i=AC(1,0)-2 then
+					mat_c(i2,ACI(j)):=ACD_2(y,j)
+				else
+					mat_c(i2,ACI(j)):=ACD_1(i-1,j)
+				end-if
+			end-if
+		end-do
+
+		v:=1.
+	  	i2:=ACF(0,j)
+	  	if i2<>-1 then
+			v:=abs(mat_c(i2,ACI(j)))
+			forall(i in 1..AC(1,0)-1) do
+				i3:=ACF(i,j)
+				if i3<>-1 then
+					mat_c(i3,ACI(j)):=mat_c(i3,ACI(j))/v
+				end-if
+			end-do
+		end-if
+	end-do
+
+	forall(i in 0..NIT-1,j in ACSL(i)..ACSL(i+1)-1) do
+		ACCO(j,n,y):=mat_c(i,ACVR(j))  !!!!youkakunin
+		if 	ID_ACM(ACVR(j))<>0 then
+			ACCO1(j,n,y):=0
+		else
+			ACCO1(j,n,y):=mat_c(i,ACVR(j))
+		end-if
+	end-do
+end-do
+
+i2:=0
+forall(i in 0..NIT2-1) do
+	ACSL2(i):=i2
+	forall(j in NACr) do
+		if(mat_i(ITMC2(i),j)=1 and ID_ACM(j)<>0) then
+			AC2FLG(i):=1
+			ACVR2(i2):=ACTC1(j)
+			i2+=1
+		end-if
+	end-do
+end-do
+ACSL2(NIT2):=i2
+
+
+declarations
+	ACCO2:	array(0..i2-1,NNDr,NYRr) of real
+end-declarations
+
+forall(y in NYRr,n in NNDr,i in 0..NIT2-1,j in ACSL2(i)..ACSL2(i+1)-1) ACCO2(j,n,y):=mat_c(ITMC2(i),ACTC2(ACVR2(j)))
+
+
+!------------------------------------------------------------------------
+!preprocess3
+!------------------------------------------------------------------------
+writeln("preprocess3: activity limit")
+forall(i in NACr,r in NRGr,y in NYRr) AC_LMT(i,r,y):=-1
+forall(i in 0..AC_LM(0,1)-1,r in NRGr,y in NYRr) AC_LMT(AC_LMI(i),r,y):=AC_LMD(y*NRG+r,i)
+
+!------------------------------------------------------------------------
+!preprocess4
+!------------------------------------------------------------------------
+writeln("preprocess4: nodal capacity")
+
+forall(i in NNKr) do
+	NKTY(i):=0
+	NKOPI(i):=-1
+	forall(y in NYRr,n in NNDr) do
+		NKEK(i,n,y):=0
+		NKMK(i,n,y):=-1
+	end-do
+	!initialize lifetime matrix
+	forall(y in NYRr,y2 in NYRr) do
+  		if y <= y2 then
+  			NKLF(i,y,y2):=1
+  		else
+  			NKLF(i,y,y2):=0
+  		end-if
+  	end-do
+end-do
+
+!output profile
+forall(i in 0..NK_TPN-1,n in NNDr,j in 0..NK_TP(1,1)-1)	NK_TPD2(i*NND+n,NK_TPI(0,j),NK_TPI(1,j),NK_TPI(2,j)):=NK_TPD(i*NND+n,j)
+
+!plant availability, annualized capital cost, NKAF2
+forall(j in 0..NK(1,1)-1) do
+	forall(i in 0..NK(1,0)-1) do
+	   	i2:=NKF(i,j)
+	   	if i2<>-1 then
+	   		mat_k(NKI(j),i2):=1
+	   		if ID_ACM(i2)<>0 then NKTY(NKI(j)):=1 !matrix about NK&AC
+	   		end-if
+		end-if
+	end-do
+
+	forall(n in NNDr) do
+		NKAF(NKI(j),n):=NKD_2(0,j)*NKD_2(1,j)*NK_LAF(n,integer(NKD_2(4,j)))
+		!NKAFm(NKI(j),n):=NKD_2(0,j)*NKD_2(2,j)*NK_LAF(n,integer(NKD_2(4,j)))
+		NKAFm(NKI(j),n):=NKD_2(0,j)*NKD_2(2,j)
+		forall(y in NYRr)NKCC(NKI(j),n,y):=NKD_2(3,j)*NKD_3(y,j)*NK_LCC(n,integer(NKD_2(5,j)))
+	end-do
+
+	i2:=NKD_1(0,j)
+	if i2=0 then
+		NKTY(NKI(j)):=2
+		NKOPI(NKI(j)):=NKD_1(1,j)
+		forall(n in NNDr) do
+			NKCF(NKI(j),n,0):=NKD_2(1,j)
+			NKCF(NKI(j),n,1):=minlist(1., NKCF(NKI(j),n,0)+Max_Availability)
+			if NKI(j)=NK(13,0) then NKCF(NKI(j),n,1):=NKCF(NKI(j),n,0)
+			end-if!availability for nuclear
+		end-do
+	end-if
+
+	forall(n in NNDr,d in NDYr,w in NWRr,t in NTMr) do
+		if i2>0 then
+			NKAF2(NKI(j),n,d,w,t):=NK_TPD2(NND*(i2-1)+n,d,w,t)*NKD_2(0,j)
+			NKAF2m(NKI(j),n,d,w,t):=0.
+		elif i2=0 then
+			NKAF2(NKI(j),n,d,w,t):=NKD_2(0,j)
+			NKAF2m(NKI(j),n,d,w,t):=NKD_2(0,j)*NKD_2(2,j)
+		else
+			NKAF2(NKI(j),n,d,w,t):=NKD_2(0,j)*NKD_2(1,j)*NK_LAF(n,integer(NKD_2(4,j)))
+			NKAF2m(NKI(j),n,d,w,t):=NKD_2(0,j)*NKD_2(2,j)
+		end-if
+	end-do
+end-do
+
+i2:=0
+forall(i in 0..NNK-1) do
+	NKSL(i):=i2
+	forall(j in 0..NAC-1) do
+		if mat_k(i,j)=1 then
+			NKVR(i2):=j
+			NKVR2(i2):=ACTC1(j)
+			i2+=1
+		end-if
+	end-do
+end-do
+NKSL(NNK):=i2
+
+!exogenous capacity, maximum capacity
+forall(n in NNDr,y in NYRr,i in 0..NK(16,1)-1) do
+	NKEK(NK_KI(i),n,y):=NK_EKD(y*NND+n,i)
+	NKMK(NK_KI(i),n,y):=NK_MKD(y*NND+n,i)
+end-do
+
+!stored enegy factor
+forall(j in NWRr) NKSF(j):=1/DW/ID_WRP(j)
+
+!lifetime matrix
+forall(j in 0..NK(0,1)-1) do
+	if NKD_2(6,j)<>-1 then
+		forall(y in 0..NYR-1,y2 in y..NYR-1) do    !!!!!!youkakunin
+			v := ID_YRD2(y2)-ID_YRD2(y)
+			if NKD_2(6,j)<=v then NKLF(NKI(j),y,y2):=0
+			end-if
+		end-do
+	end-if
+end-do
+
+!------------------------------------------------------------------------
+!preprocess5
+!------------------------------------------------------------------------
+writeln("preprocess5: nodal capacity operation")
+forall(i in NNKOPr) do
+ 	NKRU(i):=(1+NK_OPD(0,i))^TW !NK_OPD(0,i)*TW
+	NKRD(i):=(1-NK_OPD(1,i))^TW !NK_OPD(1,i)*TW
+	NKMO(i,0):=NK_OPD(2,i)
+	NKMO(i,1):=NK_OPD(3,i)
+end-do
+
+forall(i in 0..NNKMS-1) do
+  	k:=0.
+  	forall(j in 0..NK_OP(1,1)-1) do
+  		NKMS(i,NK_MSI(j)):=NK_MSD(i,j)
+  		k+=NKMS(i,NK_MSI(j))
+  	end-do
+  	NKMSA(i):=k/NK_OP(1,1)
+end-do
+
+!------------------------------------------------------------------------
+!preprocess6
+!------------------------------------------------------------------------
+writeln("preprocess6: inter-nodal capacity")
+forall(i in NIKr) do
+	IKTY(i):=0
+	IKF2(0,i):=ACTC1(IKF(0,i))
+	IKF2(1,i):=ACTC1(IKF(1,i))
+	if IKF(2,i)<>-1 then
+		IKF2(2,i):=ACTC1(IKF(2,i))
+	else
+		IKF2(2,i):=-1
+	end-if
+	if ID_ACM(IKF(0,i))<>0 then
+		IKTY(i):=1
+		IKT2(i):=0
+	end-if
+	forall(r in NRMr) do
+		IKAF(i,r):=0
+		IKFG(i,r):=0
+		IKEF(i,r):=0
+		IKCC(i,r):=0
+		IKEK(i,r):=0
+		IKMK(i,r):=-1
+	end-do
+	!initialize lifetime matrix
+	forall(y in NYRr,y2 in NYRr) do
+		if y <= y2 then
+			IKLFM(i,y,y2) := 1
+		else
+			IKLFM(i,y,y2) := 0
+		end-if
+	end-do
+end-do
+
+forall(i in NIKLr) do
+	IKLTY(i):=0
+	IKLF2(0,i):=ACTC1(IKLF(0,i))
+	IKLF2(1,i):=ACTC1(IKLF(1,i))
+	if IKLF(2,i)<>-1 then
+		IKLF2(2,i):=ACTC1(IKLF(2,i))
+	else
+		IKLF2(2,i):=-1
+	end-if
+	if ID_ACM(IKLF(0,i))<>0 then
+		IKLTY(i):=1
+		IKLT2(i):=0
+	end-if
+	forall(r in NRMr) do
+		IKLAF(i,r):=0
+		IKLFG(i,r):=0
+		IKLEF(i,r):=0
+		IKLCC(i,r):=0
+		IKLEK(i,r):=0
+		IKLMK(i,r):=-1
+	end-do
+	!initialize lifetime matrix
+	forall(y in NYRr,y2 in NYRr) do
+		if y <= y2 then
+			IKLLFM(i,y,y2) := 1
+		else
+			IKLLFM(i,y,y2) := 0
+		end-if
+	end-do
+end-do
+
+forall(r in NRMr,n in NNDr) do
+	MAT(0,r,n):=0
+	MAT(1,r,n):=0
+end-do
+forall(r in NRMr) do
+	MAT(0,r,IK_DKI(1,r)):=1
+	MAT(1,r,IK_DKI(0,r)):=1
+end-do
+forall(r in NRLr,n in NNDr) do
+	MATL(0,r,n):=0
+	MATL(1,r,n):=0
+end-do
+forall(r in NRLr) do
+	MATL(0,r,IKL_DKI(1,r)):=1
+	MATL(1,r,IKL_DKI(0,r)):=1
+end-do
+
+forall(i in 0..IK(0,1)-1) IKT2(IKI(i)):=IKT(i)
+forall(i in 0..IKL(0,1)-1)IKLT2(IKLI(i)):=IKLT(i)
+
+forall(i in 0..IK_DK(2,0)-1,r in NRMr)IKDS(i,r):=-1
+forall(i in 0..IKL_DK(2,0)-1,r in NRLr)IKLDS(i,r):=-1
+
+forall(j in 0..IK_DK(2,1)-1) do
+	forall(i in 0..IK_DK(2,0)-1)IKDS(i,j):=IK_DSD(i,j)
+	forall(i in 0..IK_DK(4,0)-1)IKEK(IK_EKI(i),j):=IK_EKD(i,j)
+	forall(i in 0..IK_DK(6,0)-1)IKMK(IK_MKI(i),j):=IK_MKD(i,j)
+end-do
+
+forall(j in 0..IKL_DK(2,1)-1) do
+	forall(i in 0..IKL_DK(2,0)-1)IKLDS(i,j):=IKL_DSD(i,j)
+	forall(i in 0..IKL_DK(4,0)-1)IKLEK(IKL_EKI(i),j):=IKL_EKD(i,j)
+	forall(i in 0..IKL_DK(6,0)-1)IKLMK(IKL_MKI(i),j):=IKL_MKD(i,j)
+end-do
+
+forall(i in 0..IK(0,1)-1) do
+	forall(r in NRMr) do
+		ds1:=IKDS(IKT(i),r)/1000
+	  	if ds1>0 then
+			IKAF(IKI(i),r):=IKD_1(2,i)/(2*ds1+IKD_1(3,i))
+	  		!connecting land transport (for maritime transport)
+	  		ds2:=0.
+	  		ef2:=1.
+	  		cc2:=0.
+	  		vc2:=0.
+	  		if IKC(i)<>-1 then !for conneccting transport from the port
+	  			ds2:=(maxlist(0,ID_NDPD(IK_DKI(0,r)))+maxlist(0,ID_NDPD(IK_DKI(1,r))))/1000
+	  			ef2:=(1-IKLD_1(0,IKC(i)))^ds2*(1-IKLD_1(1,IKC(i)))^2
+	  			cc2:=(IKLD_2(2,IKC(i))*ds2+IKLD_2(3,IKC(i)))*IKLD_2(4,IKC(i))
+	  			vc2:=IKLD_2(0,IKC(i))*ds2+IKLD_2(1,IKC(i))
+	  		end-if
+	  		IKFG(IKI(i),r):=1
+	  		IKEF(IKI(i),r):=(1-IKD_1(0,i))^ds1*(1-IKD_1(1,i))^2*ef2
+			IKCC(IKI(i),r):=(IKD_2(2,i)*ds1+IKD_2(3,i))*IKD_2(4,i)+cc2
+			IKVC(IKI(i),r):=IKD_2(0,i)*ds1+IKD_2(1,i)+vc2
+		end-if
+	end-do
+	!lifetime matrix
+	if IKD_2(4,i)<>-1 then
+		forall(y in 0..NYR-1,y2 in y..NYR-1) do
+			v := ID_YRD2(y2)-ID_YRD2(y)
+			if IKD_1(4,i) <= v then IKLFM(IKI(i),y,y2):=0
+			end-if
+		end-do
+	end-if
+end-do
+
+
+forall(i in 0..IKL(0,1)-1) do
+	forall(r in NRLr) do
+	  	ds1:=IKLDS(IKLT(i),r)/1000
+	  	if ds1>0 then
+			IKLAF(IKLI(i),r):=IKLD_1(2,i)*IKLD_1(3,i)
+	  		IKLFG(IKLI(i),r):=1
+	  		IKLEF(IKLI(i),r):=(1-IKLD_1(0,i))^ds1*(1-IKLD_1(1,i))^2
+			IKLCC(IKLI(i),r):=(IKLD_2(2,i)*ds1+IKLD_2(3,i))*IKLD_2(4,i)
+			IKLVC(IKLI(i),r):=IKLD_2(0,i)*ds1+IKLD_2(1,i)
+		end-if
+	end-do
+	!lifetime matrix
+	if IKLD_2(4,i)<>-1 then
+		forall(y in 0..NYR-1,y2 in y..NYR-1) do
+			v := ID_YRD2(y2)-ID_YRD2(y)
+			if IKLD_1(4,i) <= v then IKLLFM(IKLI(i),y,y2):=0
+			end-if
+		end-do
+	end-if
+end-do
+
+!------------------------------------------------------------------------
+!preprocess7
+!------------------------------------------------------------------------
+writeln("preprocess7: demand")
+forall(i in NITr,n in NNDr,y in NYRr)RHS0(i,n,y):=0.
+forall(i in NIT2r,n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)RHS2(i,n,y,d,w,t):=0.
+forall(i in NFCr,n in NNDr,y in NYRr,d in NDYr,t in NTMr)FC_LDD2(i,n,y,d,t):=1./NDY/NTM
+forall(j in 0..FC_LD(0,1)-1,n in NNDr,y in NYRr) do
+	FC_LDD2(FC_LDI(0,j),n,y,FC_LDI(1,j),FC_LDI(2,j)):=FC_LDD(y*NND+n,j)
+end-do
+forall(j in 0..FC(3,1)-1,n in NNDr,y in NYRr) do
+	if ID_ITM(FCF(j))=0 then
+		RHS0(FCF(j),n,y):=FCD(y*NND+n,j)
+	else
+		forall(d in NDYr,w in NWRr,t in NTMr) RHS2(ITMC1(FCF(j)),n,y,d,w,t):=FCD(y*NND+n,j)*FC_LDD2(FCI(j),n,y,d,t)*ID_WRP(w)
+	end-if
+end-do
+
+!------------------------------------------------------------------------
+!preprocess8
+!------------------------------------------------------------------------
+writeln("preprocess8: resource")
+forall(i in NRSr)RSF0(i):=-1
+forall(i in NRSr,n in NNDr,y in NYRr)RSD0(i,n,y):=0
+forall(i in 0..RS(1,1)-1) do
+	RSF0(RSI(i)):=RSF(i)
+	RST0(RSI(i)):=RST(i)
+end-do
+forall(i in 0..RS(3,1)-1,n in NNDr,y in NYRr)RSD0(RSI(i),n,y):=RSD(y*NND+n,i)
+
+!------------------------------------------------------------------------
+!constraints and variables
+!------------------------------------------------------------------------
+writeln("preprocess9: model config")
+declarations
+	!constraints
+	obj:	linctr								!million USD
+	eqcx:	array(NRGr,NYRr) of linctr
+	eqsv:	array(NFCr,NNDr,NYRr) of linctr
+	eqit0:	array(NITr,NNDr,NYRr) of linctr
+!	eqit2:	array(NITr,NNDr,NYRr,NDYr,NWRr,NTMr) of linctr
+	eqit2:	array(NIT2r,NNDr,NYRr,NDYr,NWRr,NTMr) of linctr
+
+	!variables
+	fx_cst: 	array(NYRr) of mpvar		!fixed cost (capital+fixed O&M)
+	fxnk_cst: 	array(NNDr,NYRr) of mpvar	!fized(NK)
+	fxik_cst: 	array(NRMr,NYRr) of mpvar	!fixed(IK)
+	fxikl_cst: 	array(NRLr,NYRr) of mpvar	!fixed(IK)
+	fu_cst: 	array(NYRr) of mpvar		!fuel cost
+	ov_cst: 	array(NYRr) of mpvar		!other variable cost
+	sv_cst: 	array(NYRr) of mpvar		!penalty for energy saving (loss of consumer utility)
+    cx_cst:		array(NYRr) of mpvar		!carbon tax
+
+	z0: array(NITr,NNDr,NYRr) of mpvar
+	z2: array(NIT2r,NNDr,NYRr,NDYr,NWRr,NTMr) of mpvar
+	ze: array(NRGr,NYRr) of mpvar							!emissions
+	a2: array(NIT2r,NNDr,NYRr,NDYr,NWRr,NTMr) of mpvar
+
+	xac0: 	array(NACr,NNDr,NYRr) of mpvar					!activity
+	xac2: 	array(NAC2r,NNDr,NYRr,NDYr,NWRr,NTMr) of mpvar	!activity (activity type 2)
+	xmx2: 	array(NNKOPr,NNDr,NYRr,NDYr) of mpvar			!maximum output
+	ank: 	array(NNKOPr,NNDr,NYRr,NDYr) of mpvar 			!available capacity
+	xnk: 	array(NNKr,NNDr,NYRr) of mpvar					!total nodal capacity
+	xnnk: 	array(NNKr,NNDr,NYRr) of mpvar					!newly added nodal capacity
+
+	xtp0:	array(NIKr,NRMr,NYRr) of mpvar	  		  		!inter-nodal activity
+	xtn0: 	array(NIKr,NRMr,NYRr) of mpvar	  		  		!inter-nodal activity
+	xtp2: 	array(NIKr,NRMr,NYRr,NDYr,NTMr) of mpvar		!inter-nodal activity (activity type 2)
+	xtn2: 	array(NIKr,NRMr,NYRr,NDYr,NTMr) of mpvar 		!inter-nodal activity (activity type 2)
+	xik:	array(NIKr,NRMr,NYRr) of mpvar
+	xnik: 	array(NIKr,NRMr,NYRr) of mpvar
+
+	xtpl0:	array(NIKLr,NRLr,NYRr) of mpvar	  				!inter-nodal activity
+	xtnl0:	array(NIKLr,NRLr,NYRr) of mpvar	  				!inter-nodal activity
+	xtpl2:	array(NIKLr,NRLr,NYRr,NDYr,NTMr) of mpvar		!inter-nodal activity (activity type 2)
+	xtnl2:	array(NIKLr,NRLr,NYRr,NDYr,NTMr) of mpvar       !inter-nodal activity (activity type 2)
+	xikl:	array(NIKLr,NRLr,NYRr) of mpvar
+	xnikl:	array(NIKLr,NRLr,NYRr) of mpvar
+end-declarations
+
+forall(n in NNDr,y in NYRr) do
+	forall(i in NITr) z0(i,n,y) is_free
+	forall(i in NIT2r,d in NDYr,w in NWRr,t in NTMr) do
+		z2(i,n,y,d,w,t) is_free
+		a2(i,n,y,d,w,t) is_free
+	end-do
+end-do
+
+forall(r in NRGr,y in NYRr) ze(r,y) is_free
+
+!------------------------------------------------------------------------
+!objective function
+!------------------------------------------------------------------------
+obj := sum(y in NYRr)(ID_DCR(y)*(fx_cst(y) + ov_cst(y) + fu_cst(y) + sv_cst(y) + cx_cst(y)))
+
+forall(y in NYRr) fx_cst(y) = sum(r in NRMr)fxik_cst(r,y)+sum(r in NRLr)fxikl_cst(r,y)+sum(n in NNDr)fxnk_cst(n,y)
+forall(y in NYRr) fu_cst(y) = sum(n in NNDr)z0(0,n,y)
+forall(y in NYRr) ov_cst(y) = sum(n in NNDr)z0(1,n,y)+sum(i in NIKr,r in NRMr)(xtp0(i,r,y)+xtn0(i,r,y))*IKVC(i,r)+sum(i in NIKLr,r in NRLr)(xtpl0(i,r,y)+xtnl0(i,r,y))*IKLVC(i,r)
+forall(y in NYRr) sv_cst(y) = sum(n in NNDr)z0(2,n,y)
+forall(y in NYRr) cx_cst(y) = sum(r in NRGr)ze(r,y)*CTAX(r,y)
+
+forall(n in NNDr,y in NYRr) fxnk_cst(n,y) = sum(i in NNKr, y2 in 0..y)xnnk(i,n,y2)*NKLF(i,y2,y)*NKCC(i,n,y2)
+forall(r in NRMr,y in NYRr) fxik_cst(r,y) = sum(i in NIKr, y2 in 0..y)xnik(i,r,y2)*IKLFM(i,y2,y)*IKCC(i,r)
+forall(r in NRLr,y in NYRr) fxikl_cst(r,y)= sum(i in NIKLr,y2 in 0..y)xnikl(i,r,y2)*IKLLFM(i,y2,y)*IKLCC(i,r)
+
+
+!------------------------------------------------------------------------
+!constraints (flow)
+!------------------------------------------------------------------------
+!CO2 emissions
+forall(r in NRGr,y in NYRr)
+	eqcx(r,y) := sum(n in NNDr)RGD(n,r)*z0(4,n,y) = ze(r,y)
+
+forall(r in NRGr,y in NYRr)
+	if RGE_D(Case*NRG+r,y)<>-1 then ze(r,y) <= RGE_D(Case*NRG+r,y)
+	end-if
+
+!item balances
+forall(i in NACr,n in NNDr,y in NYRr)
+	if ID_ACM(i) <> 0 then xac0(i,n,y) = sum(d in NDYr,w in NWRr,t in NTMr) xac2(ACTC1(i),n,y,d,w,t)
+	end-if
+
+forall(i in NACr,r in NRGr,y in NYRr)
+	if AC_LMT(i,r,y)>=0 then sum(n in NNDr)RGD(n,r)*xac0(i,n,y) <= AC_LMT(i,r,y)
+	end-if
+
+forall(i in NITr,n in NNDr,y in NYRr)
+	if ID_ITM(i) = 0 then
+		eqit0(i,n,y):=sum(m in ACSL(i)..ACSL(i+1)-1) ACCO(m,n,y)*xac0(ACVR(m),n,y) = z0(i,n,y)
+		if   ID_SIG(i)="E"	then	z0(i,n,y) =  RHS0(i,n,y)
+		elif ID_SIG(i)="G"	then	z0(i,n,y) >= RHS0(i,n,y)
+		elif ID_SIG(i)="L"	then	z0(i,n,y) <= RHS0(i,n,y)
+		elif ID_SIG(i)="CL" then
+			if ID_NDTY(n)<>0 then z0(i,n,y) <= RHS0(i,n,y)
+			end-if
+		end-if
+	else
+		z0(i,n,y) = sum(d in NDYr,w in NWRr,t in NTMr)z2(ITMC1(i),n,y,d,w,t)
+	end-if
+
+
+forall(i in NIT2r,n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr) do
+	eqit2(i,n,y,d,w,t):=sum(m in ACSL(ITMC2(i))..ACSL(ITMC2(i)+1)-1)ACCO1(m,n,y)*xac0(ACVR(m),n,y)*DTW(w) + a2(i,n,y,d,w,t) = z2(i,n,y,d,w,t)
+
+	if	AC2FLG(i)<>0	then
+		a2(i,n,y,d,w,t) = sum(m in ACSL2(i)..ACSL2(i+1)-1)ACCO2(m,n,y)*xac2(ACVR2(m),n,y,d,w,t)
+	else
+		a2(i,n,y,d,w,t) = 0
+	end-if
+
+	!eqit2(i,n,y,d,w,t):=sum(m in ACSL(ITMC2(i))..ACSL(ITMC2(i)+1)-1) ACCO(m,n,y)*xac2(ACVR(m),n,y,d,w,t) = z2(i,n,y,d,w,t)
+	if	 ID_SIG(ITMC2(i))="E"	then 	z2(i,n,y,d,w,t) =  RHS2(i,n,y,d,w,t)
+	elif ID_SIG(ITMC2(i))="G"	then	z2(i,n,y,d,w,t) >= RHS2(i,n,y,d,w,t)
+	elif ID_SIG(ITMC2(i))="L"	then	z2(i,n,y,d,w,t) <= RHS2(i,n,y,d,w,t)
+	elif ID_SIG(ITMC2(i))="CL" then
+		if ID_NDTY(n)<>0 then	z2(i,n,y,d,w,t) <= RHS2(i,n,y,d,w,t)
+		end-if
+	end-if
+end-do
+
+!inter-nodal balance
+forall(i in NIKr,n in NNDr,y in NYRr)
+	if IKTY(i)=0 then
+		xac0(IKF(0,i),n,y) = sum(r in NRMr)(xtp0(i,r,y)*MAT(0,r,n)+xtn0(i,r,y)*MAT(1,r,n))*IKEF(i,r)
+		xac0(IKF(1,i),n,y) = sum(r in NRMr)(xtp0(i,r,y)*MAT(1,r,n)+xtn0(i,r,y)*MAT(0,r,n))
+		if IKF(2,i)<>-1 then
+			xac0(IKF(2,i),n,y) = sum(r in NRMr)(xtp0(i,r,y)*MAT(0,r,n)+xtn0(i,r,y)*MAT(1,r,n))*(1.-IKEF(i,r))
+		end-if
+	end-if
+
+forall(i in NIKLr,n in NNDr,y in NYRr)
+	if IKLTY(i)=0 then
+		xac0(IKLF(0,i),n,y) = sum(r in NRLr)(xtpl0(i,r,y)*MATL(0,r,n)+xtnl0(i,r,y)*MATL(1,r,n))*IKLEF(i,r)
+		xac0(IKLF(1,i),n,y) = sum(r in NRLr)(xtpl0(i,r,y)*MATL(1,r,n)+xtnl0(i,r,y)*MATL(0,r,n))
+		if IKLF(2,i)<>-1 then
+			xac0(IKLF(2,i),n,y) = sum(r in NRLr)(xtpl0(i,r,y)*MATL(0,r,n)+xtnl0(i,r,y)*MATL(1,r,n))*(1.-IKLEF(i,r))
+		end-if
+	end-if
+
+forall(i in NIKr,n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)
+	if IKTY(i)<>0 then
+		!For8760Model
+		xac2(IKF2(0,i),n,y,d,w,t) = sum(r in NRMr)(	sum(z in TZr)TZW(ID_NDTM(n),ID_NDTM(IK_DKI(0,r)),z)*xtp2(i,r,y,TZD(ID_NDTM(n),d,t,ID_NDTM(IK_DKI(0,r)),z),TZT(ID_NDTM(n),t,ID_NDTM(IK_DKI(0,r)),z))*MAT(0,r,n) + xtn2(i,r,y,d,t)*MAT(1,r,n) )*IKEF(i,r)*ID_WRP(w)
+		xac2(IKF2(1,i),n,y,d,w,t) = sum(r in NRMr)(	xtp2(i,r,y,d,t)*MAT(1,r,n) + sum(z in TZr)TZW(ID_NDTM(n),ID_NDTM(IK_DKI(0,r)),z)*xtn2(i,r,y,TZD(ID_NDTM(n),d,t,ID_NDTM(IK_DKI(0,r)),z),TZT(ID_NDTM(n),t,ID_NDTM(IK_DKI(0,r)),z))*MAT(0,r,n) )*ID_WRP(w)
+
+		if IKF2(2,i)<>-1 then
+			xac2(IKF2(2,i),n,y,d,w,t) = sum(r in NRMr)(	sum(z in TZr)TZW(ID_NDTM(n),ID_NDTM(IK_DKI(0,r)),z)*xtp2(i,r,y,TZD(ID_NDTM(n),d,t,ID_NDTM(IK_DKI(0,r)),z),TZT(ID_NDTM(n),t,ID_NDTM(IK_DKI(0,r)),z))*MAT(0,r,n) + xtn2(i,r,y,d,t)*MAT(1,r,n) )*(1.-IKEF(i,r))*ID_WRP(w)
+		end-if
+	end-if
+
+
+forall(i in NIKLr,n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)
+	if IKLTY(i)<>0 then
+		!For8760Model
+		xac2(IKLF2(0,i),n,y,d,w,t) = sum(r in NRLr)(	sum(z in TZr)TZW(ID_NDTM(n),ID_NDTM(IKL_DKI(0,r)),z)*xtpl2(i,r,y,TZD(ID_NDTM(n),d,t,ID_NDTM(IKL_DKI(0,r)),z),TZT(ID_NDTM(n),t,ID_NDTM(IKL_DKI(0,r)),z))*MATL(0,r,n) + xtnl2(i,r,y,d,t)*MATL(1,r,n))*IKLEF(i,r)*ID_WRP(w)
+		xac2(IKLF2(1,i),n,y,d,w,t) =
+			sum(r in NRLr)(	xtpl2(i,r,y,d,t)*MATL(1,r,n) + sum(z in TZr)TZW(ID_NDTM(n),ID_NDTM(IKL_DKI(0,r)),z)*xtnl2(i,r,y,TZD(ID_NDTM(n),d,t,ID_NDTM(IKL_DKI(0,r)),z),TZT(ID_NDTM(n),t,ID_NDTM(IKL_DKI(0,r)),z))*MATL(0,r,n) )*ID_WRP(w)
+
+		if IKLF2(2,i)<>-1 then
+			xac2(IKLF2(2,i),n,y,d,w,t) = sum(r in NRLr)(	sum(z in TZr)TZW(ID_NDTM(n),ID_NDTM(IKL_DKI(0,r)),z)*xtpl2(i,r,y,TZD(ID_NDTM(n),d,t,ID_NDTM(IKL_DKI(0,r)),z),TZT(ID_NDTM(n),t,ID_NDTM(IKL_DKI(0,r)),z))*MATL(0,r,n) + xtnl2(i,r,y,d,t)*MATL(1,r,n))*(1.-IKLEF(i,r))*ID_WRP(w)
+		end-if
+	end-if
+
+forall(i in NIKr,r in NRMr,y in NYRr)
+	if IKTY(i)<>0 then
+		xtp0(i,r,y) = sum(d in NDYr,t in NTMr)xtp2(i,r,y,d,t)
+		xtn0(i,r,y) = sum(d in NDYr,t in NTMr)xtn2(i,r,y,d,t)
+	end-if
+forall(i in NIKLr,r in NRLr,y in NYRr)
+	if IKLTY(i)<>0 then
+		xtpl0(i,r,y) = sum(d in NDYr,t in NTMr)xtpl2(i,r,y,d,t)
+		xtnl0(i,r,y) = sum(d in NDYr,t in NTMr)xtnl2(i,r,y,d,t)
+	end-if
+
+
+forall(i in NIKr,r in NRMr,y in NYRr,d in NDYr,t in NTMr)
+	if IKTY(i)=0 then
+		xtp2(i,r,y,d,t) = xtp0(i,r,y)*DT
+		xtn2(i,r,y,d,t) = xtn0(i,r,y)*DT
+	end-if
+
+forall(i in NIKLr,r in NRLr,y in NYRr,d in NDYr,t in NTMr)
+	if IKLTY(i)=0 then
+		xtpl2(i,r,y,d,t) = xtpl0(i,r,y)*DT
+		xtnl2(i,r,y,d,t) = xtnl0(i,r,y)*DT
+	end-if
+
+
+!inter-nodal facility
+forall(i in NIKr,r in NRMr,y in NYRr)
+	if IKTY(i)=0 then
+		xtp0(i,r,y) + xtn0(i,r,y) <= xik(i,r,y)*IKAF(i,r)
+	end-if
+
+forall(i in NIKr,r in NRMr,y in NYRr,d in NDYr,t in NTMr)!maritime transport (activity type <> 0)
+	!For8760Model
+	if IKTY(i)<>0 then
+		xtp2(i,r,y,d,t)+xtn2(i,r,y,d,t) <= xik(i,r,y)*IKAF(i,r)*DT
+	end-if
+
+forall(i in NIKLr,r in NRLr,y in NYRr)
+	if IKLTY(i)=0 then
+		xtpl0(i,r,y) + xtnl0(i,r,y) <= xikl(i,r,y)*IKLAF(i,r)
+	end-if
+
+forall(i in NIKLr,r in NRLr,y in NYRr,d in NDYr,t in NTMr)!land transport (activity type <> 0)
+	!For8760Model
+	if IKLTY(i)<>0 then
+		xtpl2(i,r,y,d,t)+xtnl2(i,r,y,d,t) <= xikl(i,r,y)*IKLAF(i,r)*DT
+	end-if
+
+!resource constraints	//depletable if(RST0(i)=0) //renewables if(RST0(i)<>0)
+forall(i in NRSr,n in NNDr,y in NYRr)
+	if RSD0(i,n,y)>=0 and RST0(i)=0 then
+		sum(y2 in 0..y) z0(RSF0(i),n,y2)*ID_YRD(y2) <= RSD0(i,n,y)
+	end-if
+
+forall(i in NRSr,n in NNDr,y in NYRr)
+	if RSD0(i,n,y)>=0 and RST0(i)<>0 then
+		z0(RSF0(i),n,y) <= RSD0(i,n,y)
+	end-if
+
+!plant output constraint
+forall(i in NNKr,n in NNDr,y in NYRr) do
+	if NKTY(i)=0 then
+		sum(j in NKSL(i)..NKSL(i+1)-1) xac0(NKVR(j),n,y) <= xnk(i,n,y)*NKAF(i,n)
+	end-if
+	sum(j in NKSL(i)..NKSL(i+1)-1) xac0(NKVR(j),n,y) >= xnk(i,n,y)*NKAFm(i,n)
+end-do
+
+forall(i in NK(5,0)..NK(5,0),n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)
+	sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) = xnk(i,n,y)*NKAF2(i,n,d,w,t)*DTW(w) !hydro
+
+forall(i in NK(6,0)..NK(6,1),n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)
+	sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) = xnk(i,n,y)*NKAF2(i,n,d,w,t)*DTW(w) !solar wind
+
+forall(i in NK(12,0)..NK(12,1),n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)
+	sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) = xnk(i,n,y)*NKAF2(i,n,d,w,t)*DTW(w) !loading and unloading facilities for tankers
+
+forall(i in NNKr,n in NNDr,y in NYRr,d in NDYr,w in NWRr,t in NTMr)
+	if NKTY(i) = 1 then
+		sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) <= xnk(i,n,y)*NKAF2(i,n,d,w,t)*DTW(w)
+		sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) >= xnk(i,n,y)*NKAF2m(i,n,d,w,t)*DTW(w)
+	elif NKTY(i) = 2 then
+		sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) <= ank(NKOPI(i),n,y,d)*NKAF2(i,n,d,w,t)*DTW(w)
+		sum(m in NKSL(i)..NKSL(i+1)-1) xac2(NKVR2(m),n,y,d,w,t) >= ank(NKOPI(i),n,y,d)*NKAF2m(i,n,d,w,t)*DTW(w)
+	end-if
+
+!operational constraints(power plants)
+forall(i in NNKOPr,n in NNDr,y in NYRr) do
+	!available capacity
+	forall(d in NDYr) ank(i,n,y,d) <= xnk(NK_OPI(i),n,y)*NKCF(NK_OPI(i),n,0)
+
+	!minimum output
+	forall(d in NDYr,w in NWRr,t in NTMr)
+		xmx2(i,n,y,d)*(NKAF2(NK_OPI(i),n,d,w,t)*DTW(w)) >= sum(m in NKSL(NK_OPI(i))..NKSL(NK_OPI(i)+1)-1)xac2(NKVR2(m),n,y,d,w,t)
+	forall(d in NDYr,w in NWRr,t in NTMr)
+		sum(m in NKSL(NK_OPI(i))..NKSL(NK_OPI(i)+1)-1) xac2(NKVR2(m),n,y,d,w,t) >= (xmx2(i,n,y,d)-NKMO(i,0)*ank(i,n,y,d))*NKMO(i,1)*NKAF2(NK_OPI(i),n,d,w,t)*DTW(w)
+
+	!ramping capability for power plants
+	forall(m in NKSL(NK_OPI(i))..NKSL(NK_OPI(i)+1)-1, w in NWRr) do
+		xac2(NKVR2(m),n,y,0,w,0) <= xac2(NKVR2(m),n,y,NDY-1,w,NTM-1)*NKRU(i)
+		xac2(NKVR2(m),n,y,0,w,0) >= xac2(NKVR2(m),n,y,NDY-1,w,NTM-1)*NKRD(i)
+
+		forall(d in 1..NDY-1) do
+			xac2(NKVR2(m),n,y,d,w,0) <= xac2(NKVR2(m),n,y,d-1,w,NTM-1)*NKRU(i)
+			xac2(NKVR2(m),n,y,d,w,0) >= xac2(NKVR2(m),n,y,d-1,w,NTM-1)*NKRD(i)
+		end-do
+
+		forall(d in NDYr,t in 1..NTM-1) do
+			xac2(NKVR2(m),n,y,d,w,t) <= xac2(NKVR2(m),n,y,d,w,t-1)*NKRU(i)
+			xac2(NKVR2(m),n,y,d,w,t) >= xac2(NKVR2(m),n,y,d,w,t-1)*NKRD(i)
+		end-do
+	end-do
+end-do
+
+!electricity storage balance
+!balance between t and t-1
+forall(n in NNDr,y in NYRr, w in NWRr) do
+	!For 8760 Model
+	xac2(ACTC1(AC(5,0)),n,y,0,w,0) = xac2(ACTC1(AC(5,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(6,0)),n,y,0,w,0) = xac2(ACTC1(AC(6,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(7,0)),n,y,0,w,0) = xac2(ACTC1(AC(7,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(8,0)),n,y,0,w,0) = xac2(ACTC1(AC(8,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(9,0)),n,y,0,w,0) = xac2(ACTC1(AC(9,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(10,0)),n,y,0,w,0) = xac2(ACTC1(AC(10,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(11,0)),n,y,0,w,0) = xac2(ACTC1(AC(11,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(12,0)),n,y,0,w,0) = xac2(ACTC1(AC(12,1)),n,y,NDY-1,w,NTM-1)
+	xac2(ACTC1(AC(13,0)),n,y,0,w,0) = xac2(ACTC1(AC(13,1)),n,y,NDY-1,w,NTM-1)
+
+	forall(d in 1..NDY-1) do
+		xac2(ACTC1(AC(5,0)),n,y,d,w,0) = xac2(ACTC1(AC(5,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(6,0)),n,y,d,w,0) = xac2(ACTC1(AC(6,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(7,0)),n,y,d,w,0) = xac2(ACTC1(AC(7,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(8,0)),n,y,d,w,0) = xac2(ACTC1(AC(8,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(9,0)),n,y,d,w,0) = xac2(ACTC1(AC(9,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(10,0)),n,y,d,w,0) = xac2(ACTC1(AC(10,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(11,0)),n,y,d,w,0) = xac2(ACTC1(AC(11,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(12,0)),n,y,d,w,0) = xac2(ACTC1(AC(12,1)),n,y,d-1,w,NTM-1)
+		xac2(ACTC1(AC(13,0)),n,y,d,w,0) = xac2(ACTC1(AC(13,1)),n,y,d-1,w,NTM-1)
+	end-do
+	forall(d in NDYr,t in 1..NTM-1) do
+		xac2(ACTC1(AC(5,0)),n,y,d,w,t) = xac2(ACTC1(AC(5,1)),n,y,d,w,t-1)
+		xac2(ACTC1(AC(6,0)),n,y,d,w,t) = xac2(ACTC1(AC(6,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(7,0)),n,y,d,w,t) = xac2(ACTC1(AC(7,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(8,0)),n,y,d,w,t) = xac2(ACTC1(AC(8,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(9,0)),n,y,d,w,t) = xac2(ACTC1(AC(9,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(10,0)),n,y,d,w,t) = xac2(ACTC1(AC(10,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(11,0)),n,y,d,w,t) = xac2(ACTC1(AC(11,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(12,0)),n,y,d,w,t) = xac2(ACTC1(AC(12,1)),n,y,d,w,t-1)
+	    xac2(ACTC1(AC(13,0)),n,y,d,w,t) = xac2(ACTC1(AC(13,1)),n,y,d,w,t-1)
+	end-do
+
+
+	!energy capacity constraint
+	forall(d in NDYr,t in NTMr) do
+		xac2(ACTC1(AC(5,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(7,0),n,y)*Duration_Battery1
+		xac2(ACTC1(AC(6,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(7,1),n,y)*Duration_Battery2
+		xac2(ACTC1(AC(7,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(8,0),n,y)*Duration_Battery3
+		xac2(ACTC1(AC(8,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(9,0),n,y)*Unit_H2
+		xac2(ACTC1(AC(9,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(9,1),n,y)*Unit_H2
+		xac2(ACTC1(AC(10,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(10,0),n,y)*Unit_CH4
+		xac2(ACTC1(AC(11,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(10,1),n,y)*Unit_CH4
+		xac2(ACTC1(AC(12,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(11,0),n,y)*Unit_MCH
+		xac2(ACTC1(AC(13,1)),n,y,d,w,t)*NKSF(w) <= xnk(NK(11,1),n,y)*Unit_AMM
+	end-do
+end-do
+
+!energy saving constraint
+forall(i in NFCr,n in NNDr,y in NYRr) do
+	eqsv(i,n,y):= sum(j in FCS(1,i)..FCS(2,i))xac0(j,n,y) = xac0(FCS(0,i),n,y)
+	if Case = 0 then
+		forall(j in FCS(1,i)..FCS(2,i)) xac0(j,n,y) = 0
+	end-if
+end-do
+
+!------------------------------------------------------------------------
+!constraints (stock)
+!------------------------------------------------------------------------
+!nodal facilities
+forall(i in NNKr,n in NNDr,y in NYRr)
+	xnk(i,n,y) = NKEK(i,n,y) + sum(y2 in 0..y)xnnk(i,n,y2)*NKLF(i,y2,y)
+
+forall(i in NNKr,n in NNDr,y in NYRr)
+	if NKMK(i,n,y)<>-1 then
+		xnk(i,n,y) <= NKMK(i,n,y)
+	end-if
+
+
+!maritime trade
+forall(i in NIKr,y in NYRr)
+	sum(r in NRMr)xik(i,r,y) = sum(r in NRMr)(IKEK(i,r) + sum(y2 in 0..y)xnik(i,r,y2)*IKLFM(i,y2,y))
+
+forall(i in NIKr,r in NRMr,y in NYRr)
+	if IKMK(i,r)<>-1 then
+		xik(i,r,y) <= IKMK(i,r)
+	end-if
+
+forall(i in NIKr,r in NRMr,y in NYRr)
+	if IKFG(i,r)=0 then
+		xik(i,r,y) = 0
+	end-if
+
+!land trade
+forall(i in NIKLr,r in NRLr,y in NYRr)
+	xikl(i,r,y) = IKLEK(i,r) + sum(y2 in 0..y)xnikl(i,r,y2)*IKLLFM(i,y2,y)
+
+forall(i in NIKLr,r in NRLr,y in NYRr)
+	if IKLMK(i,r)<>-1 then
+		xikl(i,r,y) <= IKLMK(i,r)
+	end-if
+
+forall(i in NIKLr,r in NRLr,y in NYRr)
+	if IKLFG(i,r)=0 then
+		xikl(i,r,y) = 0
+	end-if
+
+!------------------------------------------------------------------------
+!algorithm options
+!------------------------------------------------------------------------
+setparam("xprs_crossover",0)! 0: off, 1: on
+setparam("xprs_bariterlimit",10000)
+setparam("xprs_verbose", true)
+setparam("xprs_baroutput", 1)
+!setparam("xprs_barthreads",-1)
+!solve the problem
+minimize(LPALGORITHM, obj)
+
+
+
+!------------------------------------------------------------------------
+!result exports
+!------------------------------------------------------------------------
+declarations
+	OTH = 12		!fixed-nk,fixed-ik,fixed-bat,fixed-RE,fixed-fuelstation,fixed-vehicle,ov-cost-ik,carbonprice
+
+	ID_NDRG:array(0..NND+NRG-1) of string
+	R_Z0L1:	array(0..NYR*(OTH+NIT)-1) of string
+	R_Z0L2:	array(0..NND+NRG-1) of string
+	R_Z0: 	array(0..NND+NRG-1,0..NYR*(OTH+NIT)-1) of real
+	R_ACL:	array(0..NYR*NAC*(NND+NRG)-1) of string
+	R_AC:	array(0..NYR*NAC*(NND+NRG)-1,0..NDY*NWR*NTM) of real
+	R_NKL:	array(0..NYR*NNK*(NND+NRG)-1) of string
+	R_NK:	array(0..NYR*NNK*(NND+NRG)-1) of real
+
+	R_IL1:	array(0..NYR*NIK*NRM-1) of string
+	R_IR1:	array(0..NYR*NIK*NRM-1,0..2) of real
+	R_IL2:	array(0..NYR*NIKL*NRL-1) of string
+	R_IR2:	array(0..NYR*NIKL*NRL-1,0..2) of real
+
+	R_ZL_Dual:	array(0..NYR*NND*NIT-1) of string
+	R_Z_Dual:	array(0..NYR*NND*NIT-1,0..NDY*NWR*NTM) of real
+
+	rZ0 = NND+NRG+1
+	rAC = NYR*NAC*(NND+NRG)+1
+	rNK = NYR*NNK*(NND+NRG)+1
+	rIR1 = NYR*NIK*NRM+1
+	rIR2 = NYR*NIKL*NRL+1
+	rDual = NYR*NND*NIT+1
+end-declarations
+
+!------------------------------------------------------------------------
+!report write
+!------------------------------------------------------------------------
+
+forall(r1 in NRGr)	ID_NDRG(r1):=ID_RG(r1)
+
+forall(n1 in NNDr)	ID_NDRG(n1+NRG):=ID_ND(n1)
+
+forall(y in NYRr) do
+	R_Z0L1(y*(OTH+NIT)+0):=ID_YR(y)+"-"+"FXC_IK"
+	R_Z0L1(y*(OTH+NIT)+1):=ID_YR(y)+"-"+"FXC_NK"
+	R_Z0L1(y*(OTH+NIT)+2):=ID_YR(y)+"-"+"FXC_BT"
+	R_Z0L1(y*(OTH+NIT)+3):=ID_YR(y)+"-"+"FXC_VRE"
+	R_Z0L1(y*(OTH+NIT)+4):=ID_YR(y)+"-"+"FXC_WL"
+	R_Z0L1(y*(OTH+NIT)+5):=ID_YR(y)+"-"+"FXC_TM"
+	R_Z0L1(y*(OTH+NIT)+6):=ID_YR(y)+"-"+"OVC_IK"
+	R_Z0L1(y*(OTH+NIT)+7):=ID_YR(y)+"-"+"FXC_DAC"
+	R_Z0L1(y*(OTH+NIT)+8):=ID_YR(y)+"-"+"FXC_H2C"
+	R_Z0L1(y*(OTH+NIT)+9):=ID_YR(y)+"-"+"FXC_H2R"
+	R_Z0L1(y*(OTH+NIT)+10):=ID_YR(y)+"-"+"FXC_TANK"
+	R_Z0L1(y*(OTH+NIT)+OTH-1):=ID_YR(y)+"-"+"CPR"
+
+	forall(i in NITr)
+		R_Z0L1(y*(OTH+NIT)+OTH+i):=ID_YR(y)+"-"+ID_IT(i)
+
+	forall(r in NRMr) do
+		!FXC_IK
+		R_Z0(IK_DKI(0,r),y*(OTH+NIT)+0)+=getsol(fxik_cst(r,y))*0.5
+		R_Z0(IK_DKI(1,r),y*(OTH+NIT)+0)+=getsol(fxik_cst(r,y))*0.5
+		!OVC_IK
+		forall(i in NIKr) do
+			R_Z0(IK_DKI(0,r),y*(OTH+NIT)+6)+=(getsol(xtp0(i,r,y))+getsol(xtn0(i,r,y)))*IKVC(i,r)*0.5
+			R_Z0(IK_DKI(1,r),y*(OTH+NIT)+6)+=(getsol(xtp0(i,r,y))+getsol(xtn0(i,r,y)))*IKVC(i,r)*0.5
+		end-do
+	end-do
+
+	forall(r in NRLr) do
+		!FXC_IK
+		R_Z0(IKL_DKI(0,r),y*(OTH+NIT)+0)+=getsol(fxikl_cst(r,y))*0.5
+		R_Z0(IKL_DKI(1,r),y*(OTH+NIT)+0)+=getsol(fxikl_cst(r,y))*0.5
+		!OVC_IK
+		forall(i in NIKLr) do
+			R_Z0(IKL_DKI(0,r),y*(OTH+NIT)+6)+=(getsol(xtpl0(i,r,y))+getsol(xtnl0(i,r,y)))*IKLVC(i,r)*0.5
+			R_Z0(IKL_DKI(1,r),y*(OTH+NIT)+6)+=(getsol(xtpl0(i,r,y))+getsol(xtnl0(i,r,y)))*IKLVC(i,r)*0.5
+		end-do
+	end-do
+
+	forall(n1 in NNDr) do
+	  	R_Z0L2(n1):=ID_ND(n1)
+		R_Z0(n1,y*(OTH+NIT)+1):=getsol(fxnk_cst(n1,y))
+
+		!battery
+		v := 0.
+		forall(y2 in 0..y) v += getsol(xnnk(NK(7,0),n1,y2))*NKLF(NK(7,0),y2,y)*NKCC(NK(7,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(7,1),n1,y2))*NKLF(NK(7,1),y2,y)*NKCC(NK(7,1),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(8,0),n1,y2))*NKLF(NK(8,0),y2,y)*NKCC(NK(8,0),n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+2):=v
+
+		!varible renewables
+		v := 0.
+		forall(i in NK(6,0)..NK(6,1),y2 in 0..y) v += getsol(xnnk(i,n1,y2))*NKLF(i,y2,y)*NKCC(i,n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+3):=v
+
+		!water electrolysis
+		v := 0.
+		forall(i in NK(19,0)..NK(19,0),y2 in 0..y) v += getsol(xnnk(i,n1,y2))*NKLF(i,y2,y)*NKCC(i,n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+4):=v
+
+		!importing and exporting terminal
+		v := 0.
+		forall(y2 in 0..y) v += getsol(xnnk(NK(9,1),n1,y2))*NKLF(NK(9,1),y2,y)*NKCC(NK(9,1),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(10,1),n1,y2))*NKLF(NK(10,1),y2,y)*NKCC(NK(10,1),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(11,0),n1,y2))*NKLF(NK(11,0),y2,y)*NKCC(NK(11,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(11,1),n1,y2))*NKLF(NK(11,1),y2,y)*NKCC(NK(11,1),n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+5):=v
+
+		!direct air capture
+		v := 0.
+		forall(i in NK(21,0)..NK(21,1),y2 in 0..y) v += getsol(xnnk(i,n1,y2))*NKLF(i,y2,y)*NKCC(i,n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+7):=v
+
+		!Carrier production
+		v := 0.
+		forall(y2 in 0..y) v += getsol(xnnk(NK(22,0),n1,y2))*NKLF(NK(22,0),y2,y)*NKCC(NK(22,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(23,0),n1,y2))*NKLF(NK(23,0),y2,y)*NKCC(NK(23,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(24,0),n1,y2))*NKLF(NK(24,0),y2,y)*NKCC(NK(24,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(25,0),n1,y2))*NKLF(NK(25,0),y2,y)*NKCC(NK(25,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(26,0),n1,y2))*NKLF(NK(26,0),y2,y)*NKCC(NK(26,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(27,0),n1,y2))*NKLF(NK(27,0),y2,y)*NKCC(NK(27,0),n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+8):=v
+
+		!Hydrogen reconversion
+		v := 0.
+		forall(y2 in 0..y) v += getsol(xnnk(NK(22,1),n1,y2))*NKLF(NK(22,1),y2,y)*NKCC(NK(22,1),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(25,1),n1,y2))*NKLF(NK(25,1),y2,y)*NKCC(NK(25,1),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(26,1),n1,y2))*NKLF(NK(26,1),y2,y)*NKCC(NK(26,1),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(27,1),n1,y2))*NKLF(NK(27,1),y2,y)*NKCC(NK(27,1),n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+9):=v
+
+		!H2 and CH4 storage tank
+		v := 0.
+		forall(y2 in 0..y) v += getsol(xnnk(NK(9,0),n1,y2))*NKLF(NK(9,0),y2,y)*NKCC(NK(9,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(10,0),n1,y2))*NKLF(NK(10,0),y2,y)*NKCC(NK(10,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(28,0),n1,y2))*NKLF(NK(28,0),y2,y)*NKCC(NK(28,0),n1,y2)
+		forall(y2 in 0..y) v += getsol(xnnk(NK(28,1),n1,y2))*NKLF(NK(28,1),y2,y)*NKCC(NK(28,1),n1,y2)
+		R_Z0(n1,y*(OTH+NIT)+10):=v
+
+		R_Z0(n1,y*(OTH+NIT)+OTH-1):=0
+
+		forall(i in NITr)R_Z0(n1,y*(OTH+NIT)+OTH+i):=getsol(z0(i,n1,y))
+
+		forall(i in NACr) do
+			R_ACL(i+n1*NAC+y*NAC*(NND+NRG)) :=ID_YR(y)+"-"+ID_ND(n1)+"-"+ID_AC(i)
+			R_AC(i+n1*NAC+y*NAC*(NND+NRG),0):=getsol(xac0(i,n1,y))
+
+			if ID_ACM(i)=0 then
+				forall(d in NDYr,w in NWRr,t in NTMr) do
+					R_AC(i+n1*NAC+y*NAC*(NND+NRG),1+t+w*NTM+d*NWR*NTM):=getsol(xac0(i,n1,y))/8.76
+				end-do
+			end-if
+		end-do
+
+		forall(i in NAC2r,d in NDYr,w in NWRr,t in NTMr) do
+			R_AC(ACTC2(i)+n1*NAC+y*NAC*(NND+NRG),1+t+w*NTM+d*NWR*NTM):=getsol(xac2(i,n1,y,d,w,t))/8.76/DTW(w)
+		end-do
+
+		forall(i in NNKr) do
+			R_NKL(i+n1*NNK+y*NNK*(NND+NRG)):=ID_YR(y)+"-"+ID_ND(n1)+"-"+ID_NK(i)
+			R_NK(i+n1*NNK+y*NNK*(NND+NRG)):=getsol(xnk(i,n1,y))
+		end-do
+
+	end-do
+
+	forall(i in NIKr,r in NRMr) do
+		R_IL1(i+r*NIK+y*NIK*NRM)  :=ID_YR(y)+"-"+ID_ND(IK_DKI(0,r))+"-"+ID_ND(IK_DKI(1,r))+"-"+ID_IK(i)
+		R_IR1(i+r*NIK+y*NIK*NRM,0):=getsol(xik(i,r,y))
+		R_IR1(i+r*NIK+y*NIK*NRM,1):=getsol(xtp0(i,r,y))
+		R_IR1(i+r*NIK+y*NIK*NRM,2):=getsol(xtn0(i,r,y))
+	end-do
+
+	forall(i in NIKLr,r in NRLr) do
+		R_IL2(i+r*NIKL+y*NIKL*NRL)  :=ID_YR(y)+"-"+ID_ND(IKL_DKI(0,r))+"-"+ID_ND(IKL_DKI(1,r))+"-"+ID_IKL(i)
+		R_IR2(i+r*NIKL+y*NIKL*NRL,0):=getsol(xikl(i,r,y))
+		R_IR2(i+r*NIKL+y*NIKL*NRL,1):=getsol(xtpl0(i,r,y))
+		R_IR2(i+r*NIKL+y*NIKL*NRL,2):=getsol(xtnl0(i,r,y))
+	end-do
+
+	!marginal cost
+	forall(n1 in NNDr,i in NITr) do
+	  	R_ZL_Dual(i+n1*NIT+y*NND*NIT):=ID_YR(y)+"-"+ID_ND(n1)+"-"+ID_IT(i)
+
+		if ID_ITM(i)=0 then
+			R_Z_Dual(i+n1*NIT+y*NND*NIT,0):=getdual(eqit0(i,n1,y))/ID_DCR(y)
+			forall(d in NDYr,w in NWRr,t in NTMr) R_Z_Dual(i+n1*NIT+y*NND*NIT,1+t+w*NTM+d*NWR*NTM):=0
+		else
+			v:=0.
+			v2:=0.
+			forall(d in NDYr,w in NWRr,t in NTMr) do
+				v2 := getdual(eqit2(ITMC1(i),n1,y,d,w,t))/ID_DCR(y)
+				R_Z_Dual(i+n1*NIT+y*NND*NIT,1+t+w*NTM+d*NWR*NTM) := v2
+				v += v2*DTW(w)
+			end-do
+		  	R_Z_Dual(i+n1*NIT+y*NND*NIT,0):= v
+		end-if
+	end-do
+
+	if Case=0 then
+		forall(n1 in NNDr,i in NFCr) FCD_2(n1+y*NND,i):=getdual(eqsv(i,n1,y))/ID_DCR(y)
+	else
+		forall(n1 in NNDr,i in NFCr) FCD_2(n1+y*NND,i):=FCD_2(n1+y*NND,i)
+	end-if
+
+	!aggregated results by region
+	forall(r1 in NRGr) do
+		forall(i in 0..OTH+NIT-1) do
+			v:=0.
+
+			if i=OTH-1 then
+				v:=-getdual(eqcx(r1,y))/ID_DCR(y)
+			else
+				forall(n1 in NNDr) v+=RGD(n1,r1)*R_Z0(n1,i+y*(OTH+NIT))
+			end-if
+
+			R_Z0L2(r1+NND):=ID_RG(r1)
+			R_Z0(r1+NND,i+y*(OTH+NIT)):=v
+		end-do
+
+		forall(i in NACr) do
+			R_ACL(i+r1*NAC+NND*NAC+y*NAC*(NND+NRG)):=ID_YR(y)+"-"+ID_RG(r1)+"-"+ID_AC(i)
+			v:=0.
+			forall(n1 in NNDr) v+=RGD(n1,r1)*getsol(xac0(i,n1,y))
+			R_AC(i+r1*NAC+NND*NAC+y*NAC*(NND+NRG),0):=v
+		end-do
+
+		forall(i in NNKr) do
+			R_NKL(i+r1*NNK+NND*NNK+y*NNK*(NND+NRG)):=ID_YR(y)+"-"+ID_RG(r1)+"-"+ID_NK(i)
+			v:=0.
+			forall(n1 in NNDr) v+=RGD(n1,r1)*getsol(xnk(i,n1,y))
+			R_NK(i+r1*NNK+NND*NNK+y*NNK*(NND+NRG)):=v
+		end-do
+	end-do
+end-do
+
+initializations to "mmsheet.excel:NE_Hydrogen_Output.xlsx"
+	!indices
+	ID_NDRG as "noindex;NDRG"
+	ID_ND  	as "noindex;ND"
+	ID_RG  	as "noindex;RG"
+	ID_NDTM as "noindex;NDT"
+	ID_AC  	as "noindex;AC"
+	ID_NK  	as "noindex;NK"
+	ID_IK  	as "noindex;IK"
+	ID_YR  	as "noindex;YR"
+	!results
+	R_Z0L1 as "noindex;[Z0$B1:" + ID_OTF(0) + "1]"
+	R_Z0L2 as "noindex;[Z0$A2:A"	+ rZ0 + "]"
+	R_Z0   as "noindex;[Z0$B2:"	+ ID_OTF(0) + rZ0 + "]"
+	R_ACL  as "noindex;[AC$A2:A"	+ rAC + "]"
+	R_AC   as "noindex;[AC$B2:"	+ ID_OTF(1) + rAC + "]" !AH for 8slots*4days, CT for 24hours*4days, LXZ for 8760 model
+	R_NKL  as "noindex;[NK$A2:A"	+ rNK + "]"
+	R_NK   as "noindex;[NK$B2:B"	+ rNK + "]"
+
+	!tentative-marginal price
+	R_ZL_Dual  as "noindex;[Z_Dual$A2:A" + rDual + "]"
+	R_Z_Dual   as "noindex;[Z_Dual$B2:"  + ID_OTF(1) + rDual + "]"
+end-initializations
+
+initializations to "mmsheet.excel:NE_Hydrogen_Output2.xlsx"
+	ID_ND  as "noindex;ND"
+	ID_IK  as "noindex;IK"
+	ID_IKL as "noindex;IKL"
+	ID_YR  as "noindex;YR"
+	R_IL1  as "noindex;[IR1$A2:A" + rIR1 + "]"
+	R_IR1  as "noindex;[IR1$B2:D" + rIR1 + "]" !AI fpr 8lots*4days,CU for 24hours*4days,LYA for 8760 model
+	R_IL2  as "noindex;[IR2$A2:A" + rIR2 + "]"
+	R_IR2  as "noindex;[IR2$B2:D" + rIR2 + "]"
+end-initializations
+
+initializations to "mmsheet.excel:NE_Hydrogen_Input.xlsx"
+	FCD_2  as "noindex;FCD_2"
+end-initializations
+
+writeln("Finished")
+end-model
